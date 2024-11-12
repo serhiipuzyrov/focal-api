@@ -23,6 +23,10 @@ os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = './secrets/gcp_key.json'
 connector = Connector()
 
 
+'''
+pymysql (MySQL) engine does not support async usage, asyncpg (PostgreSQL) can be used instead
+https://pypi.org/project/cloud-sql-python-connector/ - Async Driver Usage
+'''
 def get_engine():
     connection = connector.connect(
         INSTANCE_CONNECTION_NAME,
