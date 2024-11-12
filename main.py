@@ -24,10 +24,9 @@ connector = Connector()
 
 
 def get_engine():
-    # Create a secure connection to Cloud SQL using asyncpg for async support
     connection = connector.connect(
         INSTANCE_CONNECTION_NAME,
-        "pymysql",  # Async MySQL equivalent should be configured
+        "pymysql",
         user=DB_USER,
         password=DB_PASS,
         db=DB_NAME
