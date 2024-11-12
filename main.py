@@ -36,7 +36,6 @@ def get_engine():
 
 
 # Create a database session dependency
-# SessionLocal is now asynchronous
 async_session = sessionmaker(
     bind=get_engine(),
     class_=AsyncSession,
