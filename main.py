@@ -1,8 +1,9 @@
 from fastapi import FastAPI, HTTPException, Depends
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy import text
 from google.cloud.sql.connector import Connector
-import sqlalchemy
+import asyncio
 import os
 import uvicorn
 import yaml
@@ -23,7 +24,7 @@ os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = './secrets/gcp_key.json'
 connector = Connector()
 
 
-def get_engine():
+async def get_engine():
     # Create a secure connection to Cloud SQL
     connection = connector.connect(
         INSTANCE_CONNECTION_NAME,
@@ -32,69 +33,76 @@ def get_engine():
         password=DB_PASS,
         db=DB_NAME
     )
-    return sqlalchemy.create_engine("mysql+pymysql://", creator=lambda: connection)
+    return create_async_engine("mysql+aiomysql://", creator=lambda: connection, echo=True)
+
+# Setup a global async engine variable
+async_engine = asyncio.run(get_engine())
 
 
-# Create a database session dependency
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=get_engine())
+# Create an async session dependency
+AsyncSessionLocal = sessionmaker(
+    bind=async_engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autocommit=False,
+    autoflush=False
+)
 
 
-def get_db():
-    db = SessionLocal()
-    try:
+async def get_db():
+    async with AsyncSessionLocal() as db:
         yield db
-    finally:
-        db.close()
 
 
 # Function to fetch the main product by UPC
-def fetch_product_by_upc(db: Session, upc: str):
+async def fetch_product_by_upc(db: AsyncSession, upc: str):
     query = text("SELECT * FROM products WHERE upc = :upc")
-    result = db.execute(query, {"upc": upc}).fetchone()
-    return result
+    result = await db.execute(query, {"upc": upc})
+    return result.fetchone()
 
 
 # Function to fetch the product ID by alternate UPC
-def fetch_product_id_by_alternate_upc(db: Session, upc: str):
+async def fetch_product_id_by_alternate_upc(db: AsyncSession, upc: str):
     query = text("SELECT product_id FROM product_alternates WHERE upc = :upc")
-    result = db.execute(query, {"upc": upc}).fetchone()
-    return result.product_id if result else None
+    result = await db.execute(query, {"upc": upc})
+    row = result.fetchone()
+    return row.product_id if row else None
 
 
 # Function to fetch alternates (variants and cases) for a given product ID
-def fetch_alternates_by_product_id(db: Session, product_id: int):
+async def fetch_alternates_by_product_id(db: AsyncSession, product_id: int):
     query = text("SELECT upc, alternate_type, case_pack FROM product_alternates WHERE product_id = :product_id")
-    return db.execute(query, {"product_id": product_id}).fetchall()
+    result = await db.execute(query, {"product_id": product_id})
+    return result.fetchall()
 
 
 # Endpoint to get product details
 @app.get("/v1/product/{upc}")
-def get_product_details(upc: str, db: Session = Depends(get_db)):
+async def get_product_details(upc: str, db: AsyncSession = Depends(get_db)):
     # Validate UPC length
     if len(upc) != 14:
         raise HTTPException(status_code=400, detail="UPC must be 14 digits long")
 
     # Step 1: Try to find the product in the main products table
-    product = fetch_product_by_upc(db, upc)
+    product = await fetch_product_by_upc(db, upc)
 
     # Step 2: If not found, check if it's an alternate UPC in product_alternates
     if not product:
-        product_id = fetch_product_id_by_alternate_upc(db, upc)
+        product_id = await fetch_product_id_by_alternate_upc(db, upc)
         if not product_id:
             raise HTTPException(status_code=404, detail="Product not found")
 
         # Fetch the main product using the product_id from the alternate table
-        product = db.execute(
-            text("SELECT * FROM products WHERE product_id = :product_id"),
-            {"product_id": product_id}
-        ).fetchone()
+        query = text("SELECT * FROM products WHERE product_id = :product_id")
+        result = await db.execute(query, {"product_id": product_id})
+        product = result.fetchone()
 
     # If still not found, return 404
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
     # Step 3: Fetch any alternates (variants or cases) for this product ID
-    alternates = fetch_alternates_by_product_id(db, product.product_id)
+    alternates = await fetch_alternates_by_product_id(db, product.product_id)
 
     # Format the alternates for the response
     variants = [
