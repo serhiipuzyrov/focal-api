@@ -4,15 +4,9 @@ ENV PYTHONUNBUFFERED True
 
 ENV APP_HOME /app
 
-# Copy the rest of the application code to /app
-COPY . $APP_HOME
-
 WORKDIR $APP_HOME
 
 COPY . ./
-
-# Copy the 'secrets' folder to /app/secrets in the container
-COPY secrets $APP_HOME/secrets
 
 ENV PORT 8080
 

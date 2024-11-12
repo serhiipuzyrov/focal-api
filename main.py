@@ -3,7 +3,6 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import text
 from google.cloud.sql.connector import Connector
-import asyncio
 import os
 import uvicorn
 import yaml
@@ -24,34 +23,30 @@ os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = './secrets/gcp_key.json'
 connector = Connector()
 
 
-async def get_engine():
-    # Create a secure connection to Cloud SQL
+def get_engine():
+    # Create a secure connection to Cloud SQL using asyncpg for async support
     connection = connector.connect(
         INSTANCE_CONNECTION_NAME,
-        "pymysql",
+        "pymysql",  # Async MySQL equivalent should be configured
         user=DB_USER,
         password=DB_PASS,
         db=DB_NAME
     )
-    return create_async_engine("mysql+aiomysql://", creator=lambda: connection, echo=True)
-
-# Setup a global async engine variable
-async_engine = asyncio.run(get_engine())
+    return create_async_engine("mysql+aiomysql://", creator=lambda: connection)
 
 
-# Create an async session dependency
-AsyncSessionLocal = sessionmaker(
-    bind=async_engine,
+# Create a database session dependency
+# SessionLocal is now asynchronous
+async_session = sessionmaker(
+    bind=get_engine(),
     class_=AsyncSession,
     expire_on_commit=False,
-    autocommit=False,
-    autoflush=False
 )
 
 
 async def get_db():
-    async with AsyncSessionLocal() as db:
-        yield db
+    async with async_session() as session:
+        yield session
 
 
 # Function to fetch the main product by UPC
